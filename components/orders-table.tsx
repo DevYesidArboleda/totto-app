@@ -18,8 +18,8 @@ export function OrdersTable() {
     async function fetchOrders() {
       try {
         const result = await listOrdersAction(1, 15)
-        if (result.success && result.data?.list) {
-          setOrders(result.data.list)
+        if (result.success && (result.data as any).list) {
+          setOrders((result.data as any).list)
         } else {
           setError(result.error || "Failed to load orders")
         }

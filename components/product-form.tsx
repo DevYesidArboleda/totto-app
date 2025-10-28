@@ -36,7 +36,7 @@ export function ProductForm() {
         throw new Error(productResult.error || "Failed to create product")
       }
 
-      const productId = productResult?.data?.Id
+      const productId = (productResult?.data as any).Id
 
       // Create SKU
       formData.set("productId", productId.toString())
@@ -46,7 +46,7 @@ export function ProductForm() {
         throw new Error(skuResult.error || "Failed to create SKU")
       }
 
-      const skuId = skuResult?.data?.Id
+      const skuId = (skuResult?.data as any).Id
 
       // Update price
       const price = Number.parseFloat(formData.get("price") as string)
