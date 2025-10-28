@@ -10,7 +10,7 @@ interface OrderDetailsProps {
   order: VTEXOrder
 }
 
-export function OrderDetails({ order }: OrderDetailsProps) {
+export function OrderDetails({ order }: { order: any }) {
   return (
     <div className="space-y-6">
       {/* Order Summary */}
