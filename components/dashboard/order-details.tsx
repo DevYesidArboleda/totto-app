@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Separator } from "@/components/ui/separator"
-import type { VTEXOrder } from "@/lib/vtex/types"
+import type { VTEXOrder } from "@/lib/types"
 
 interface OrderDetailsProps {
   order: VTEXOrder

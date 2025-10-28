@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Eye, Loader2 } from "lucide-react"
 import { listOrdersAction } from "@/app/actions/vtex-actions"
 import Link from "next/link"
-import type { VTEXOrder } from "@/lib/vtex/types"
+import type { VTEXOrder } from "@/lib/types"
 
 export function OrdersTable() {
   const [orders, setOrders] = useState<VTEXOrder[]>([])
