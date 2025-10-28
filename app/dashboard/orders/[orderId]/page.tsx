@@ -31,7 +31,7 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <OrderDetails order={result.data} />
+      {result.data && <OrderDetails order={result.data} />}
     </div>
   )
 }
