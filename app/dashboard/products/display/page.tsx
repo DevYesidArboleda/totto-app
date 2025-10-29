@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Progress } from "@/components/ui/progress"
 import { 
   ShoppingCart, 
   ChevronLeft, 
@@ -21,9 +22,12 @@ import {
   Info,
   Ruler,
   Weight,
-  Box
+  Box,
+  Download,
+  FileSpreadsheet
 } from "lucide-react"
 import Image from "next/image"
+import * as XLSX from 'xlsx'
 
 interface ProductImage {
   imageUrl: string
@@ -91,6 +95,10 @@ export default function ProductDisplayPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalProducts, setTotalProducts] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
+
+  // Estados para exportación
+  const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState(0)
 
   useEffect(() => {
     loadProductPage(1)
@@ -212,7 +220,6 @@ export default function ProductDisplayPage() {
     try {
       const data = await vtexFetch(`/products/${productId}`)
       
-      // DEBUG: Ver estructura completa
       console.log('📦 Raw response:', JSON.stringify(data, null, 2))
       console.log('✅ Product name:', data?.name)
       console.log('📦 Has productId?', !!data?.productId)
@@ -237,6 +244,277 @@ export default function ProductDisplayPage() {
       })
     }
     setLoadingProduct(false)
+  }
+
+  // Función para convertir producto a fila de Excel (SIN SKUs)
+  function productToExcelRow(product: any) {
+    console.log('🔄 Converting to Excel row:', {
+      productId: product?.productId,
+      productName: product?.name,
+    })
+
+    // Manejar especificaciones de manera segura
+    let specifications = ""
+    try {
+      if (product.specifications && Array.isArray(product.specifications)) {
+        specifications = product.specifications.map((spec: any) => {
+          const value = Array.isArray(spec.value) ? spec.value.join(", ") : spec.value
+          return `${spec.name}: ${value}`
+        }).join(" | ")
+      }
+    } catch (error) {
+      console.error('Error processing specifications:', error)
+    }
+
+    // Manejar imágenes de manera segura
+    let images = ""
+    try {
+      if (product.images && Array.isArray(product.images) && product.images.length > 0) {
+        images = product.images.map((img: any) => img.imageUrl).join(" | ")
+      }
+    } catch (error) {
+      console.error('Error processing images:', error)
+    }
+
+    const row = {
+      "Product ID": product.productId || "",
+      "Product Name": product.name || "",
+      "Product Ref": product.refId || "",
+      "Description": product.description || "",
+      "Brand": product.brandName || product.brand || "",
+      "Category": product.categoryName || product.category || "",
+      "Is Active": product.isActive ? "Sí" : "No",
+      "Images": images,
+      "Specifications": specifications,
+    }
+
+    console.log('✅ Row created:', row)
+    return row
+  }
+
+  // Exportar página actual
+  async function exportCurrentPage() {
+    if (productIds.length === 0) {
+      setNotification({
+        message: "No hay productos para exportar",
+        type: "error",
+      })
+      return
+    }
+
+    console.log('📤 Starting export of current page...')
+    console.log('📦 Product IDs to export:', productIds)
+    setExporting(true)
+    setExportProgress(0)
+
+    try {
+      const excelData: any[] = []
+      let productsProcessed = 0
+
+      for (let i = 0; i < productIds.length; i++) {
+        const productId = productIds[i]
+        
+        try {
+          console.log(`\n📦 [${i + 1}/${productIds.length}] Fetching product ID: ${productId}`)
+          
+          const productDetail = await vtexFetch(`/products/${productId}`)
+          
+          console.log('📦 Product detail received:', {
+            hasData: !!productDetail,
+            productId: productDetail?.productId,
+            name: productDetail?.name,
+          })
+
+          // Validar que el producto tenga la estructura correcta
+          if (!productDetail) {
+            console.warn(`⚠️ Product ${productId}: No data received`)
+            continue
+          }
+
+          if (!productDetail.productId) {
+            console.warn(`⚠️ Product ${productId}: Missing productId in response`)
+            continue
+          }
+
+          console.log(`✅ Product ${productId} (${productDetail.name}): Processing`)
+
+          // Crear UNA fila por producto (sin SKUs)
+          try {
+            const row = productToExcelRow(productDetail)
+            excelData.push(row)
+            productsProcessed++
+            console.log(`✅ Product ${productId} added to Excel. Total rows: ${excelData.length}`)
+          } catch (error) {
+            console.error(`❌ Error creating row for product ${productId}:`, error)
+          }
+          
+        } catch (error) {
+          console.error(`❌ Error loading product ${productId}:`, error)
+        }
+
+        setExportProgress(Math.round(((i + 1) / productIds.length) * 100))
+      }
+
+      console.log('\n📊 Export Summary:')
+      console.log(`  - Products processed: ${productsProcessed}/${productIds.length}`)
+      console.log(`  - Total rows in Excel: ${excelData.length}`)
+
+      if (excelData.length === 0) {
+        console.error('❌ No data to export!')
+        throw new Error("No se pudieron procesar los productos. Revisa la consola para más detalles.")
+      }
+
+      console.log('📝 Creating Excel file...')
+      console.log('First row sample:', excelData[0])
+
+      // Crear el archivo Excel
+      const worksheet = XLSX.utils.json_to_sheet(excelData)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Productos")
+
+      // Ajustar el ancho de las columnas
+      const columnWidths = [
+        { wch: 12 },  // Product ID
+        { wch: 40 },  // Product Name
+        { wch: 15 },  // Product Ref
+        { wch: 60 },  // Description
+        { wch: 20 },  // Brand
+        { wch: 25 },  // Category
+        { wch: 12 },  // Is Active
+        { wch: 150 }, // Images
+        { wch: 150 }, // Specifications
+      ]
+      worksheet['!cols'] = columnWidths
+
+      // Descargar el archivo
+      const fileName = `productos_pagina_${currentPage}_${new Date().toISOString().split('T')[0]}.xlsx`
+      console.log(`💾 Downloading file: ${fileName}`)
+      XLSX.writeFile(workbook, fileName)
+
+      console.log('✅ Export completed successfully!')
+
+      setNotification({
+        message: `${excelData.length} productos exportados exitosamente`,
+        type: "success",
+      })
+    } catch (error) {
+      console.error('❌ Error exporting:', error)
+      setNotification({
+        message: error instanceof Error ? error.message : "Error al exportar productos",
+        type: "error",
+      })
+    }
+
+    setExporting(false)
+    setExportProgress(0)
+  }
+
+  // Exportar todos los productos
+  async function exportAllProducts() {
+    console.log('📤 Starting export of ALL products...')
+    console.log(`📊 Total pages: ${totalPages}, Total products: ${totalProducts}`)
+    
+    setExporting(true)
+    setExportProgress(0)
+
+    try {
+      const excelData: any[] = []
+      let processedProducts = 0
+
+      // Iterar por todas las páginas
+      for (let page = 1; page <= totalPages; page++) {
+        const from = (page - 1) * ITEMS_PER_PAGE
+        const to = from + ITEMS_PER_PAGE
+
+        console.log(`\n📄 Processing page ${page}/${totalPages} (products ${from}-${to})`)
+
+        // Obtener IDs de la página
+        const result = await vtexFetch("/products/ids", {
+          from: from.toString(),
+          to: to.toString(),
+        })
+
+        if (result.productIds && Array.isArray(result.productIds)) {
+          console.log(`📦 Page ${page}: ${result.productIds.length} product IDs retrieved`)
+
+          // Obtener detalles de cada producto
+          for (const productId of result.productIds) {
+            try {
+              console.log(`📦 [${processedProducts + 1}/${totalProducts}] Fetching product ID: ${productId}`)
+              
+              const productDetail = await vtexFetch(`/products/${productId}`)
+              
+              if (productDetail && productDetail.productId) {
+                console.log(`✅ Product ${productId}: ${productDetail.name}`)
+                
+                // Crear UNA fila por producto (sin SKUs)
+                try {
+                  excelData.push(productToExcelRow(productDetail))
+                } catch (error) {
+                  console.error(`Error processing product ${productId}:`, error)
+                }
+              } else {
+                console.warn(`⚠️ Product ${productId}: Invalid structure`)
+              }
+            } catch (error) {
+              console.error(`❌ Error loading product ${productId}:`, error)
+            }
+
+            processedProducts++
+            setExportProgress(Math.round((processedProducts / totalProducts) * 100))
+          }
+        }
+
+        // Pequeña pausa para no saturar el servidor
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+      console.log('\n📊 Export Summary:')
+      console.log(`  - Products processed: ${processedProducts}/${totalProducts}`)
+      console.log(`  - Total rows in Excel: ${excelData.length}`)
+
+      if (excelData.length === 0) {
+        throw new Error("No se encontraron datos para exportar")
+      }
+
+      // Crear el archivo Excel
+      const worksheet = XLSX.utils.json_to_sheet(excelData)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Todos los Productos")
+
+      // Ajustar el ancho de las columnas
+      const columnWidths = [
+        { wch: 12 },  // Product ID
+        { wch: 40 },  // Product Name
+        { wch: 15 },  // Product Ref
+        { wch: 60 },  // Description
+        { wch: 20 },  // Brand
+        { wch: 25 },  // Category
+        { wch: 12 },  // Is Active
+        { wch: 150 }, // Images
+        { wch: 150 }, // Specifications
+      ]
+      worksheet['!cols'] = columnWidths
+
+      // Descargar el archivo
+      const fileName = `todos_los_productos_${new Date().toISOString().split('T')[0]}.xlsx`
+      console.log(`💾 Downloading file: ${fileName}`)
+      XLSX.writeFile(workbook, fileName)
+
+      setNotification({
+        message: `${excelData.length} productos exportados exitosamente`,
+        type: "success",
+      })
+    } catch (error) {
+      console.error('❌ Error exporting all products:', error)
+      setNotification({
+        message: error instanceof Error ? error.message : "Error al exportar todos los productos",
+        type: "error",
+      })
+    }
+
+    setExporting(false)
+    setExportProgress(0)
   }
 
   function nextPage() {
@@ -288,16 +566,37 @@ export default function ProductDisplayPage() {
     }
   }
 
-  // Obtener las imágenes actuales con validación
   const currentImages = (selectedSKU?.images && selectedSKU.images.length > 0)
     ? selectedSKU.images 
     : selectedProduct?.images || []
 
   return (
     <div className="min-h-screen p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Catálogo de Productos VTEX</h1>
-        <p className="text-muted-foreground">Explora nuestros productos disponibles</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Catálogo de Productos VTEX</h1>
+          <p className="text-muted-foreground">Explora nuestros productos disponibles</p>
+        </div>
+
+        {/* Botones de Exportación */}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={exportCurrentPage}
+            disabled={exporting || productIds.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Exportar Página
+          </Button>
+          <Button
+            variant="default"
+            onClick={exportAllProducts}
+            disabled={exporting || totalProducts === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Exportar Todos
+          </Button>
+        </div>
       </div>
 
       {notification && (
@@ -305,6 +604,29 @@ export default function ProductDisplayPage() {
           {notification.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
           <AlertDescription>{notification.message}</AlertDescription>
         </Alert>
+      )}
+
+      {/* Barra de progreso de exportación */}
+      {exporting && (
+        <Card>
+          <CardContent className="p-6">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <Download className="h-4 w-4 animate-pulse" />
+                  Exportando productos...
+                </span>
+                <span className="font-medium">
+                  {exportProgress}%
+                </span>
+              </div>
+              <Progress value={exportProgress} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center">
+                Por favor espera, esto puede tomar algunos minutos
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[350px_1fr]">
@@ -399,7 +721,6 @@ export default function ProductDisplayPage() {
             </Card>
           ) : selectedProduct ? (
             <>
-              {/* Galería de Imágenes */}
               <Card>
                 <CardContent className="p-6">
                   {currentImages.length > 0 ? (
@@ -470,7 +791,6 @@ export default function ProductDisplayPage() {
                 </CardContent>
               </Card>
 
-              {/* Información del Producto */}
               <Card>
                 <CardHeader>
                   <div className="flex items-start justify-between">
@@ -495,7 +815,6 @@ export default function ProductDisplayPage() {
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {/* Selector de SKU */}
                   {selectedProduct.skus && selectedProduct.skus.length > 1 && (
                     <div>
                       <label className="text-sm font-semibold mb-3 block">
@@ -527,7 +846,6 @@ export default function ProductDisplayPage() {
                   {selectedSKU && (
                     <>
                       <Separator />
-
                       <div className="p-4 bg-muted rounded-lg">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
@@ -545,27 +863,19 @@ export default function ProductDisplayPage() {
                           </div>
                         </div>
                       </div>
-
-                      <Button
-                        className="w-full"
-                        size="lg"
-                        onClick={handleBuy}
-                        disabled={!selectedSKU.isActive}
-                      >
+                      <Button className="w-full" size="lg" onClick={handleBuy} disabled={!selectedSKU.isActive}>
                         <ShoppingCart className="mr-2 h-5 w-5" />
                         {selectedSKU.isActive ? "Agregar al Carrito" : "Producto no disponible"}
                       </Button>
                     </>
                   )}
 
-                  {/* Tabs con información */}
                   <Tabs defaultValue="description" className="w-full">
                     <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="description">Descripción</TabsTrigger>
                       <TabsTrigger value="specs">Especificaciones</TabsTrigger>
                       <TabsTrigger value="measures">Medidas</TabsTrigger>
                     </TabsList>
-
                     <TabsContent value="description" className="space-y-4 mt-4">
                       <div>
                         <h4 className="font-semibold mb-3 flex items-center gap-2">
@@ -577,7 +887,6 @@ export default function ProductDisplayPage() {
                         </p>
                       </div>
                     </TabsContent>
-
                     <TabsContent value="specs" className="space-y-4 mt-4">
                       {selectedProduct.specifications && selectedProduct.specifications.length > 0 ? (
                         <div className="space-y-3">
@@ -600,7 +909,6 @@ export default function ProductDisplayPage() {
                         </p>
                       )}
                     </TabsContent>
-
                     <TabsContent value="measures" className="space-y-4 mt-4">
                       {selectedSKU ? (
                         <div className="space-y-3">

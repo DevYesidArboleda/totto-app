@@ -25,8 +25,10 @@ export default function DashboardLayout({
       <Suspense fallback={<div>Loading...</div>}>
         <Sidebar>
           <SidebarHeader>
-            <div className="px-2 py-4 flex items-center justify-center">
-              <Image src="/totto-logo.svg" alt="Totto Logo" width={120} height={48} className="object-contain" />
+            <div className="px-2 py-4 flex items-center justify-center">              
+            <Link href="/">
+                  <Image src="/totto-logo.svg" alt="Totto Logo" width={120} height={48} className="object-contain" />
+                </Link>
             </div>
           </SidebarHeader>
           <SidebarContent>
