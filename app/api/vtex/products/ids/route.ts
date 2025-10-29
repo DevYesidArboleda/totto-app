@@ -9,6 +9,10 @@ export async function GET(request: Request) {
     const apiKey = searchParams.get("apiKey")
     const apiToken = searchParams.get("apiToken")
     const environment = searchParams.get("environment") || "myvtex"
+    
+    // Parámetros de paginación
+    const from = searchParams.get("from") || "0"
+    const to = searchParams.get("to") || "250"
 
     if (!apiKey || !apiToken) {
       return NextResponse.json(
@@ -17,7 +21,9 @@ export async function GET(request: Request) {
       )
     }
 
-    const url = `https://${accountName}.${environment}.com/api/catalog_system/pvt/products/GetProductAndSkuIds`
+    const url = `https://${accountName}.${environment}.com/api/catalog_system/pvt/products/GetProductAndSkuIds?_from=${from}&_to=${to}`
+    
+    console.log('🌐 Fetching products from', from, 'to', to)
 
     const response = await fetch(url, {
       method: "GET",
@@ -39,17 +45,18 @@ export async function GET(request: Request) {
 
     const result = await response.json()
     
-    console.log('📦 VTEX Response:', JSON.stringify(result).substring(0, 200))
-    console.log('📦 Has data property:', !!result.data)
     console.log('📦 Range info:', result.range)
        
     const productIds = Object.keys(result.data || {}).map(id => parseInt(id))
     
     console.log('✅ Product IDs extracted:', productIds.length)
     console.log('📦 Total available:', result.range?.total || 'unknown')
-    console.log('📦 IDs:', productIds)
     
-    return NextResponse.json(productIds)
+    // Retornar también la información de paginación
+    return NextResponse.json({
+      productIds,
+      range: result.range
+    })
   } catch (error) {
     console.error("❌ Error fetching product IDs:", error)
     return NextResponse.json(

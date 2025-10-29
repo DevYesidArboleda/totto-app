@@ -2,11 +2,10 @@ import { NextResponse } from "next/server"
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    // En Next.js 15+, params es una Promise
-    const { id } = await params
+    const { id } = params instanceof Promise ? await params : params
     
     const { searchParams } = new URL(request.url)
     const accountName = searchParams.get("accountName") || "tottoqa"
@@ -21,9 +20,10 @@ export async function GET(
       )
     }
 
-    const url = `https://${accountName}.${environment}.com/api/catalog/pvt/product/${id}`
+    // Obtener información completa del producto
+    const productUrl = `https://${accountName}.${environment}.com/api/catalog/pvt/product/${id}`
 
-    const response = await fetch(url, {
+    const productResponse = await fetch(productUrl, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -31,28 +31,77 @@ export async function GET(
         "X-VTEX-API-AppKey": apiKey,
         "X-VTEX-API-AppToken": apiToken,
       },
-      cache: "no-store",
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
+    if (!productResponse.ok) {
+      const errorText = await productResponse.text()
       return NextResponse.json(
-        { error: `VTEX API Error: ${errorText}` },
-        { status: response.status }
+        { error: `Product not found: ${errorText}` },
+        { status: productResponse.status }
       )
     }
 
-    const data = await response.json()
+    const productData = await productResponse.json()
 
-    return NextResponse.json(data, {
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    })
+    // Formatear la respuesta
+    const formattedResponse = {
+      productId: productData.Id,
+      name: productData.Name,
+      description: productData.Description || "",
+      brand: productData.BrandId,
+      brandName: productData.BrandName || "",
+      category: productData.CategoryId,
+      categoryName: productData.CategoryName || "",
+      refId: productData.RefId,
+      isActive: productData.IsActive,
+      
+      // Imágenes del producto
+      images: productData.Images?.map((img: any) => ({
+        imageUrl: img.ImageUrl,
+        imageName: img.ImageName,
+      })) || [],
+      
+      // SKUs del producto
+      skus: productData.Items?.map((item: any) => ({
+        sku: item.Id,
+        name: item.Name,
+        nameComplete: item.NameComplete,
+        refId: item.RefId,
+        ean: item.Ean,
+        
+        // Imágenes del SKU
+        images: item.Images?.map((img: any) => ({
+          imageUrl: img.ImageUrl,
+          imageName: img.ImageName,
+        })) || [],
+        
+        isActive: item.IsActive,
+        
+        // Dimensiones del SKU
+        measures: {
+          weight: item.WeightKg || 0,
+          height: item.Height || 0,
+          width: item.Width || 0,
+          length: item.Length || 0,
+          cubicWeight: item.CubicWeight || 0,
+        },
+        
+        measurementUnit: item.MeasurementUnit,
+        unitMultiplier: item.UnitMultiplier,
+      })) || [],
+      
+      // Especificaciones del producto
+      specifications: productData.ProductSpecifications?.map((spec: any) => ({
+        name: spec.FieldName,
+        value: spec.FieldValues,
+      })) || [],
+    }
+    
+    return NextResponse.json(formattedResponse)
   } catch (error) {
-    console.error("Error fetching product details:", error)
+    console.error("❌ Error fetching product detail:", error)
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 }
     )
   }

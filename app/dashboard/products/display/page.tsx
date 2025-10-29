@@ -5,18 +5,70 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ShoppingCart, ChevronLeft, ChevronRight, CheckCircle2, XCircle, AlertCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { 
+  ShoppingCart, 
+  ChevronLeft, 
+  ChevronRight, 
+  CheckCircle2, 
+  XCircle, 
+  AlertCircle, 
+  Package, 
+  ChevronsLeft, 
+  ChevronsRight,
+  Info,
+  Ruler,
+  Weight,
+  Box
+} from "lucide-react"
 import Image from "next/image"
 
-interface ProductData {
-  Id: number
-  Name: string
-  Description: string
-  Images: Array<{ ImageUrl: string; ImageName: string }>
-  CategoryId: number
-  BrandId: number
-  RefId: string
-  IsActive: boolean
+interface ProductImage {
+  imageUrl: string
+  imageName: string
+}
+
+interface ProductMeasures {
+  weight: number
+  height: number
+  width: number
+  length: number
+  cubicWeight: number
+}
+
+interface ProductSKU {
+  sku: number
+  name: string
+  nameComplete?: string
+  refId: string
+  ean?: string
+  images?: ProductImage[]
+  isActive: boolean
+  measures: ProductMeasures
+  measurementUnit?: string
+  unitMultiplier?: number
+}
+
+interface ProductSpecification {
+  name: string
+  value: string[]
+}
+
+interface ProductDetail {
+  productId: number
+  name: string
+  description?: string
+  brand?: number
+  brandName?: string
+  category?: number
+  categoryName?: string
+  refId: string
+  isActive: boolean
+  images?: ProductImage[]
+  skus: ProductSKU[]
+  specifications?: ProductSpecification[]
 }
 
 interface Notification {
@@ -24,17 +76,24 @@ interface Notification {
   type: "success" | "error"
 }
 
+const ITEMS_PER_PAGE = 250
+
 export default function ProductDisplayPage() {
   const [productIds, setProductIds] = useState<number[]>([])
-  const [selectedProduct, setSelectedProduct] = useState<ProductData | null>(null)
+  const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(null)
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
+  const [selectedSKU, setSelectedSKU] = useState<ProductSKU | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [loadingProduct, setLoadingProduct] = useState(false)
   const [notification, setNotification] = useState<Notification | null>(null)
+  
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalProducts, setTotalProducts] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
 
   useEffect(() => {
-    loadProductIds()
+    loadProductPage(1)
   }, [])
 
   useEffect(() => {
@@ -44,6 +103,14 @@ export default function ProductDisplayPage() {
     }
   }, [notification])
 
+  useEffect(() => {
+    if (selectedProduct && selectedProduct.skus && selectedProduct.skus.length > 0) {
+      const firstActive = selectedProduct.skus.find(sku => sku.isActive) || selectedProduct.skus[0]
+      setSelectedSKU(firstActive)
+      setCurrentImageIndex(0)
+    }
+  }, [selectedProduct])
+
   function getVTEXCredentials() {
     if (typeof window === "undefined") return null
 
@@ -52,11 +119,10 @@ export default function ProductDisplayPage() {
     const apiToken = localStorage.getItem("vtex_api_token") || (window as any).VTEX_API_TOKEN || "VUMMGFNKSOVZTPBYAHDLZLPDKLEZXBRMGQZUHOBWPMMUPKBMJGPIFPZECOJDEQBPLOUEOKEKBYEHNLFAHAFCWBMNSMUMFYZRBJZZTHCVBQXXMJDJASCLFKEKRPJQYMGO"
     const environment = localStorage.getItem("vtex_environment") || (window as any).VTEX_ENVIRONMENT || "myvtex"
 
-
     return { accountName, apiKey, apiToken, environment }
   }
 
-  async function vtexFetch(endpoint: string) {
+  async function vtexFetch(endpoint: string, extraParams?: Record<string, string>) {
     const credentials = getVTEXCredentials()
     if (!credentials) {
       throw new Error("No se encontraron credenciales de VTEX")
@@ -69,6 +135,7 @@ export default function ProductDisplayPage() {
       apiKey,
       apiToken,
       environment,
+      ...extraParams,
     })
 
     const proxyUrl = `/api/vtex${endpoint}?${params.toString()}`
@@ -89,55 +156,78 @@ export default function ProductDisplayPage() {
     return data
   }
 
-  async function loadProductIds() {
+  async function loadProductPage(page: number) {
     setLoading(true)
+    setSelectedProduct(null)
+    setSelectedProductId(null)
+    
     try {
-      const data = await vtexFetch("/products/ids")
-      
-      console.log('📦 Product IDs received:', data)
-      console.log('📦 Type:', typeof data, 'Is Array:', Array.isArray(data))
-      console.log('📦 Length:', data?.length)
+      const from = (page - 1) * ITEMS_PER_PAGE
+      const to = from + ITEMS_PER_PAGE
 
-      if (Array.isArray(data) && data.length > 0) {
-        setProductIds(data)
+      const result = await vtexFetch("/products/ids", {
+        from: from.toString(),
+        to: to.toString(),
+      })
+
+      if (result.productIds && Array.isArray(result.productIds)) {
+        setProductIds(result.productIds)
+        setCurrentPage(page)
+        
+        if (result.range?.total) {
+          setTotalProducts(result.range.total)
+          setTotalPages(Math.ceil(result.range.total / ITEMS_PER_PAGE))
+        }
+
         setNotification({
-          message: `${data.length} productos encontrados`,
+          message: `Página ${page} cargada: ${result.productIds.length} productos`,
           type: "success",
         })
-        // Cargar automáticamente el primer producto
-        await loadProductDetails(data[0])
+
+        if (result.productIds.length > 0) {
+          await loadProductDetails(result.productIds[0])
+        }
       } else {
-        setNotification({
-          message: "No se encontraron productos",
-          type: "error",
-        })
+        throw new Error("No se encontraron productos")
       }
     } catch (error) {
-      console.error('❌ Error loading product IDs:', error)
+      console.error('❌ Error loading products:', error)
       setNotification({
         message: error instanceof Error ? error.message : "Error al cargar productos",
         type: "error",
       })
     }
+    
     setLoading(false)
   }
 
   async function loadProductDetails(productId: number) {
-    console.log('🔍 Loading details for Product ID:', productId, 'Type:', typeof productId)
+    console.log('🔍 Loading details for Product ID:', productId)
     
     setSelectedProductId(productId)
     setLoadingProduct(true)
-    setCurrentImageIndex(0)
     setSelectedProduct(null)
+    setSelectedSKU(null)
 
     try {
       const data = await vtexFetch(`/products/${productId}`)
-      console.log('✅ Product loaded:', data?.Name || 'Unknown')
       
-      if (data && data.Id) {
+      // DEBUG: Ver estructura completa
+      console.log('📦 Raw response:', JSON.stringify(data, null, 2))
+      console.log('✅ Product name:', data?.name)
+      console.log('📦 Has productId?', !!data?.productId)
+      console.log('📦 SKUs count:', data?.skus?.length || 0)
+      console.log('📦 Images count:', data?.images?.length || 0)
+      
+      if (data && data.productId) {
         setSelectedProduct(data)
+        setNotification({
+          message: `${data.name} cargado`,
+          type: "success",
+        })
       } else {
-        throw new Error("Producto no encontrado o datos inválidos")
+        console.error('❌ Invalid data structure:', data)
+        throw new Error("Estructura de datos inválida")
       }
     } catch (error) {
       console.error('❌ Error loading product:', error)
@@ -149,24 +239,59 @@ export default function ProductDisplayPage() {
     setLoadingProduct(false)
   }
 
+  function nextPage() {
+    if (currentPage < totalPages) {
+      loadProductPage(currentPage + 1)
+    }
+  }
+
+  function previousPage() {
+    if (currentPage > 1) {
+      loadProductPage(currentPage - 1)
+    }
+  }
+
+  function goToFirstPage() {
+    loadProductPage(1)
+  }
+
+  function goToLastPage() {
+    loadProductPage(totalPages)
+  }
+
   function nextImage() {
-    if (selectedProduct && selectedProduct.Images && selectedProduct.Images.length > 0) {
-      setCurrentImageIndex((prev) => (prev === selectedProduct.Images.length - 1 ? 0 : prev + 1))
+    const images = (selectedSKU?.images && selectedSKU.images.length > 0) 
+      ? selectedSKU.images 
+      : selectedProduct?.images || []
+    
+    if (images.length > 0) {
+      setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
     }
   }
 
   function prevImage() {
-    if (selectedProduct && selectedProduct.Images && selectedProduct.Images.length > 0) {
-      setCurrentImageIndex((prev) => (prev === 0 ? selectedProduct.Images.length - 1 : prev - 1))
+    const images = (selectedSKU?.images && selectedSKU.images.length > 0)
+      ? selectedSKU.images 
+      : selectedProduct?.images || []
+    
+    if (images.length > 0) {
+      setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))
     }
   }
 
   function handleBuy() {
-    setNotification({
-      message: `${selectedProduct?.Name} agregado al carrito`,
-      type: "success",
-    })
+    if (selectedSKU) {
+      setNotification({
+        message: `${selectedProduct?.name} agregado al carrito`,
+        type: "success",
+      })
+    }
   }
+
+  // Obtener las imágenes actuales con validación
+  const currentImages = (selectedSKU?.images && selectedSKU.images.length > 0)
+    ? selectedSKU.images 
+    : selectedProduct?.images || []
 
   return (
     <div className="min-h-screen p-6 space-y-6">
@@ -182,16 +307,22 @@ export default function ProductDisplayPage() {
         </Alert>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[350px_1fr]">
         {/* Lista de Productos */}
         <Card>
           <CardHeader>
-            <CardTitle>Lista de Productos</CardTitle>
+            <CardTitle>Productos</CardTitle>
             <CardDescription>
-              {loading ? "Cargando..." : `${productIds.length} productos disponibles`}
+              {totalProducts > 0 ? (
+                <>
+                  Mostrando {(currentPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, totalProducts)} de {totalProducts}
+                </>
+              ) : (
+                "Cargando..."
+              )}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             {loading ? (
               <div className="space-y-2">
                 {[...Array(10)].map((_, i) => (
@@ -201,10 +332,10 @@ export default function ProductDisplayPage() {
             ) : productIds.length === 0 ? (
               <div className="text-center py-8">
                 <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground mb-2" />
-                <p className="text-muted-foreground">No hay productos disponibles</p>
+                <p className="text-muted-foreground">No hay productos</p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-[calc(100vh-250px)] overflow-y-auto pr-2">
+              <div className="space-y-2 max-h-[calc(100vh-380px)] overflow-y-auto pr-2">
                 {productIds.map((productId) => (
                   <Button
                     key={productId}
@@ -213,134 +344,320 @@ export default function ProductDisplayPage() {
                     onClick={() => loadProductDetails(productId)}
                     disabled={loadingProduct}
                   >
-                    Producto ID: {productId}
+                    <Package className="h-4 w-4 mr-2" />
+                    Producto #{productId}
                   </Button>
                 ))}
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div className="space-y-3 pt-4 border-t">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    Página {currentPage} de {totalPages}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" size="sm" onClick={goToFirstPage} disabled={currentPage === 1 || loading}>
+                    <ChevronsLeft className="h-4 w-4 mr-1" />
+                    Primera
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={goToLastPage} disabled={currentPage === totalPages || loading}>
+                    Última
+                    <ChevronsRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" onClick={previousPage} disabled={currentPage === 1 || loading}>
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Anterior
+                  </Button>
+                  <Button variant="outline" onClick={nextPage} disabled={currentPage === totalPages || loading}>
+                    Siguiente
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
 
         {/* Detalle del Producto */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Detalles del Producto</CardTitle>
-            <CardDescription>
-              {selectedProduct ? selectedProduct.Name : "Selecciona un producto"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingProduct ? (
-              <div className="space-y-4">
-                <Skeleton className="h-96 w-full" />
-                <Skeleton className="h-8 w-3/4" />
-                <Skeleton className="h-20 w-full" />
-              </div>
-            ) : selectedProduct ? (
-              <div className="space-y-6">
-                {/* Carrusel de Imágenes */}
-                {selectedProduct.Images && selectedProduct.Images.length > 0 ? (
-                  <div className="relative">
-                    <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
-                      <Image
-                        src={selectedProduct.Images[currentImageIndex]?.ImageUrl || "/placeholder.svg"}
-                        alt={selectedProduct.Images[currentImageIndex]?.ImageName || selectedProduct.Name}
-                        fill
-                        className="object-contain"
-                        unoptimized
-                      />
-                    </div>
-
-                    {selectedProduct.Images.length > 1 && (
-                      <>
-                        <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-4">
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="rounded-full shadow-lg"
-                            onClick={prevImage}
-                          >
-                            <ChevronLeft className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="rounded-full shadow-lg"
-                            onClick={nextImage}
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <div className="mt-4 flex justify-center gap-2">
-                          {selectedProduct.Images.map((_, index) => (
-                            <button
-                              key={index}
-                              className={`h-2 w-2 rounded-full transition-all ${
-                                index === currentImageIndex ? "bg-primary w-8" : "bg-muted-foreground/30"
-                              }`}
-                              onClick={() => setCurrentImageIndex(index)}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="aspect-square rounded-lg bg-muted flex items-center justify-center">
-                    <p className="text-muted-foreground">Sin imagen disponible</p>
-                  </div>
-                )}
-
-                {/* Información del Producto */}
+        <div className="space-y-6">
+          {loadingProduct ? (
+            <Card>
+              <CardContent className="p-6">
                 <div className="space-y-4">
-                  <div>
-                    <h3 className="text-2xl font-bold">{selectedProduct.Name}</h3>
-                    <p className="text-sm text-muted-foreground">Ref: {selectedProduct.RefId}</p>
-                  </div>
+                  <Skeleton className="h-96 w-full" />
+                  <Skeleton className="h-8 w-3/4" />
+                  <Skeleton className="h-20 w-full" />
+                </div>
+              </CardContent>
+            </Card>
+          ) : selectedProduct ? (
+            <>
+              {/* Galería de Imágenes */}
+              <Card>
+                <CardContent className="p-6">
+                  {currentImages.length > 0 ? (
+                    <div className="relative">
+                      <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                        <Image
+                          src={currentImages[currentImageIndex]?.imageUrl || ''}
+                          alt={currentImages[currentImageIndex]?.imageName || selectedProduct.name}
+                          fill
+                          className="object-contain"
+                          unoptimized
+                          onError={(e) => {
+                            console.error('Error loading image:', currentImages[currentImageIndex]?.imageUrl)
+                            e.currentTarget.src = '/placeholder.svg'
+                          }}
+                        />
+                      </div>
 
-                  {selectedProduct.Description && (
-                    <div>
-                      <h4 className="font-semibold mb-2">Descripción</h4>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {selectedProduct.Description}
+                      {currentImages.length > 1 && (
+                        <>
+                          <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-4 pointer-events-none">
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="rounded-full shadow-lg pointer-events-auto"
+                              onClick={prevImage}
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="rounded-full shadow-lg pointer-events-auto"
+                              onClick={nextImage}
+                            >
+                              <ChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-6 gap-2">
+                            {currentImages.map((img, index) => (
+                              <button
+                                key={index}
+                                className={`relative aspect-square rounded-md overflow-hidden border-2 transition-all ${
+                                  index === currentImageIndex ? "border-primary" : "border-transparent"
+                                }`}
+                                onClick={() => setCurrentImageIndex(index)}
+                              >
+                                <Image
+                                  src={img.imageUrl}
+                                  alt={img.imageName}
+                                  fill
+                                  className="object-cover"
+                                  unoptimized
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="aspect-square rounded-lg bg-muted flex flex-col items-center justify-center">
+                      <Package className="h-16 w-16 text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">Sin imágenes disponibles</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Información del Producto */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1 flex-1">
+                      <CardTitle className="text-3xl">{selectedProduct.name}</CardTitle>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={selectedProduct.isActive ? "default" : "secondary"}>
+                          {selectedProduct.isActive ? "Activo" : "Inactivo"}
+                        </Badge>
+                        {selectedProduct.brandName && (
+                          <Badge variant="outline">{selectedProduct.brandName}</Badge>
+                        )}
+                        {selectedProduct.categoryName && (
+                          <Badge variant="outline">{selectedProduct.categoryName}</Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        ID: {selectedProduct.productId} | Ref: {selectedProduct.refId}
                       </p>
+                    </div>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-6">
+                  {/* Selector de SKU */}
+                  {selectedProduct.skus && selectedProduct.skus.length > 1 && (
+                    <div>
+                      <label className="text-sm font-semibold mb-3 block">
+                        Selecciona una variante ({selectedProduct.skus.length} disponibles)
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {selectedProduct.skus.map((sku) => (
+                          <Button
+                            key={sku.sku}
+                            variant={selectedSKU?.sku === sku.sku ? "default" : "outline"}
+                            className="justify-start h-auto py-3 text-left"
+                            onClick={() => {
+                              setSelectedSKU(sku)
+                              setCurrentImageIndex(0)
+                            }}
+                          >
+                            <div className="w-full">
+                              <div className="font-medium">{sku.name}</div>
+                              <div className="text-xs opacity-70">
+                                SKU: {sku.sku} | Ref: {sku.refId}
+                              </div>
+                            </div>
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-4 text-sm border-t pt-4">
-                    <div>
-                      <span className="font-semibold">ID:</span> {selectedProduct.Id}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Categoría:</span> {selectedProduct.CategoryId}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Marca:</span> {selectedProduct.BrandId}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Estado:</span>{" "}
-                      <span className={selectedProduct.IsActive ? "text-green-600" : "text-red-600"}>
-                        {selectedProduct.IsActive ? "Activo" : "Inactivo"}
-                      </span>
-                    </div>
-                  </div>
+                  {selectedSKU && (
+                    <>
+                      <Separator />
 
-                  <Button className="w-full" size="lg" onClick={handleBuy}>
-                    <ShoppingCart className="mr-2 h-5 w-5" />
-                    Agregar al Carrito
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-96 text-muted-foreground">
-                <ShoppingCart className="h-16 w-16 mb-4 opacity-50" />
-                <p className="text-lg">Selecciona un producto de la lista</p>
+                      <div className="p-4 bg-muted rounded-lg">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold">SKU Seleccionado:</span>
+                            <Badge>{selectedSKU.name}</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            ID: {selectedSKU.sku} | Ref: {selectedSKU.refId}
+                            {selectedSKU.ean && ` | EAN: ${selectedSKU.ean}`}
+                          </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <Badge variant={selectedSKU.isActive ? "default" : "secondary"}>
+                              {selectedSKU.isActive ? "Activo" : "Inactivo"}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        className="w-full"
+                        size="lg"
+                        onClick={handleBuy}
+                        disabled={!selectedSKU.isActive}
+                      >
+                        <ShoppingCart className="mr-2 h-5 w-5" />
+                        {selectedSKU.isActive ? "Agregar al Carrito" : "Producto no disponible"}
+                      </Button>
+                    </>
+                  )}
+
+                  {/* Tabs con información */}
+                  <Tabs defaultValue="description" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="description">Descripción</TabsTrigger>
+                      <TabsTrigger value="specs">Especificaciones</TabsTrigger>
+                      <TabsTrigger value="measures">Medidas</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="description" className="space-y-4 mt-4">
+                      <div>
+                        <h4 className="font-semibold mb-3 flex items-center gap-2">
+                          <Info className="h-4 w-4" />
+                          Descripción del producto
+                        </h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                          {selectedProduct.description || "No hay descripción disponible"}
+                        </p>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="specs" className="space-y-4 mt-4">
+                      {selectedProduct.specifications && selectedProduct.specifications.length > 0 ? (
+                        <div className="space-y-3">
+                          <h4 className="font-semibold mb-3 flex items-center gap-2">
+                            <Box className="h-4 w-4" />
+                            Especificaciones técnicas
+                          </h4>
+                          {selectedProduct.specifications.map((spec, index) => (
+                            <div key={index} className="flex justify-between items-start py-2 border-b">
+                              <span className="font-medium text-sm">{spec.name}</span>
+                              <span className="text-sm text-muted-foreground text-right">
+                                {Array.isArray(spec.value) ? spec.value.join(", ") : spec.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          No hay especificaciones disponibles
+                        </p>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="measures" className="space-y-4 mt-4">
+                      {selectedSKU ? (
+                        <div className="space-y-3">
+                          <h4 className="font-semibold mb-3 flex items-center gap-2">
+                            <Ruler className="h-4 w-4" />
+                            Dimensiones y peso
+                          </h4>
+                          <div className="flex items-center justify-between py-2 border-b">
+                            <div className="flex items-center gap-2">
+                              <Weight className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium text-sm">Peso</span>
+                            </div>
+                            <span className="text-sm">{selectedSKU.measures.weight} kg</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b">
+                            <span className="font-medium text-sm">Alto</span>
+                            <span className="text-sm">{selectedSKU.measures.height} cm</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b">
+                            <span className="font-medium text-sm">Ancho</span>
+                            <span className="text-sm">{selectedSKU.measures.width} cm</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b">
+                            <span className="font-medium text-sm">Largo</span>
+                            <span className="text-sm">{selectedSKU.measures.length} cm</span>
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-b">
+                            <span className="font-medium text-sm">Peso cúbico</span>
+                            <span className="text-sm">{selectedSKU.measures.cubicWeight} kg</span>
+                          </div>
+                          {selectedSKU.measurementUnit && (
+                            <div className="flex items-center justify-between py-2">
+                              <span className="font-medium text-sm">Unidad de medida</span>
+                              <span className="text-sm">{selectedSKU.measurementUnit}</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          Selecciona un SKU para ver sus medidas
+                        </p>
+                      )}
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center h-96 text-muted-foreground">
+                <Package className="h-16 w-16 mb-4 opacity-50" />
+                <p className="text-lg">Selecciona un producto</p>
                 <p className="text-sm">para ver sus detalles</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
     </div>
   )
