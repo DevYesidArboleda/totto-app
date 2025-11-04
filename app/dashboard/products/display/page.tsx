@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -87,7 +87,6 @@ interface Notification {
   type: "success" | "error"
 }
 
-// Nueva interfaz para resultados de diagnóstico
 interface DiagnosticResults {
   totalProducts: number
   activeProducts: number
@@ -128,16 +127,18 @@ export default function ProductDisplayPage() {
   const [totalProducts, setTotalProducts] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
 
-  // Estados para exportación
   const [exporting, setExporting] = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
 
-  // Estados para el módulo de diagnóstico
   const [showDiagnostic, setShowDiagnostic] = useState(false)
   const [diagnosticData, setDiagnosticData] = useState<any[]>([])
   const [stockData, setStockData] = useState<any[]>([])
   const [diagnosticResults, setDiagnosticResults] = useState<DiagnosticResults | null>(null)
   const [analyzingData, setAnalyzingData] = useState(false)
+  const [stockFileName, setStockFileName] = useState<string>("")
+
+  // Referencia para el input de archivo
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     loadProductPage(1)
@@ -294,7 +295,6 @@ export default function ProductDisplayPage() {
       productName: product?.name,
     })
 
-    // Manejar especificaciones de manera segura
     let specifications = ""
     try {
       if (product.specifications && Array.isArray(product.specifications)) {
@@ -309,7 +309,6 @@ export default function ProductDisplayPage() {
       console.error("Error processing specifications:", error)
     }
 
-    // Manejar imágenes de manera segura
     let images = ""
     try {
       if (product.images && Array.isArray(product.images) && product.images.length > 0) {
@@ -367,7 +366,6 @@ export default function ProductDisplayPage() {
             name: productDetail?.name,
           })
 
-          // Validar que el producto tenga la estructura correcta
           if (!productDetail) {
             console.warn(`⚠️ Product ${productId}: No data received`)
             continue
@@ -380,7 +378,6 @@ export default function ProductDisplayPage() {
 
           console.log(`✅ Product ${productId} (${productDetail.name}): Processing`)
 
-          // Crear UNA fila por producto (sin SKUs)
           try {
             const row = productToExcelRow(productDetail)
             excelData.push(row)
@@ -408,26 +405,23 @@ export default function ProductDisplayPage() {
       console.log("📝 Creating Excel file...")
       console.log("First row sample:", excelData[0])
 
-      // Crear el archivo Excel
       const worksheet = XLSX.utils.json_to_sheet(excelData)
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, "Productos")
 
-      // Ajustar el ancho de las columnas
       const columnWidths = [
-        { wch: 12 }, // Product ID
-        { wch: 40 }, // Product Name
-        { wch: 15 }, // Product Ref
-        { wch: 60 }, // Description
-        { wch: 20 }, // Brand
-        { wch: 25 }, // Category
-        { wch: 12 }, // Is Active
-        { wch: 150 }, // Images
-        { wch: 150 }, // Specifications
+        { wch: 12 },
+        { wch: 40 },
+        { wch: 15 },
+        { wch: 60 },
+        { wch: 20 },
+        { wch: 25 },
+        { wch: 12 },
+        { wch: 150 },
+        { wch: 150 },
       ]
       worksheet["!cols"] = columnWidths
 
-      // Descargar el archivo
       const fileName = `productos_pagina_${currentPage}_${new Date().toISOString().split("T")[0]}.xlsx`
       console.log(`💾 Downloading file: ${fileName}`)
       XLSX.writeFile(workbook, fileName)
@@ -461,14 +455,12 @@ export default function ProductDisplayPage() {
       const excelData: any[] = []
       let processedProducts = 0
 
-      // Iterar por todas las páginas
       for (let page = 1; page <= totalPages; page++) {
         const from = (page - 1) * ITEMS_PER_PAGE
         const to = from + ITEMS_PER_PAGE
 
         console.log(`\n📄 Processing page ${page}/${totalPages} (products ${from}-${to})`)
 
-        // Obtener IDs de la página
         const result = await vtexFetch("/products/ids", {
           from: from.toString(),
           to: to.toString(),
@@ -477,7 +469,6 @@ export default function ProductDisplayPage() {
         if (result.productIds && Array.isArray(result.productIds)) {
           console.log(`📦 Page ${page}: ${result.productIds.length} product IDs retrieved`)
 
-          // Obtener detalles de cada producto
           for (const productId of result.productIds) {
             try {
               console.log(`📦 [${processedProducts + 1}/${totalProducts}] Fetching product ID: ${productId}`)
@@ -487,7 +478,6 @@ export default function ProductDisplayPage() {
               if (productDetail && productDetail.productId) {
                 console.log(`✅ Product ${productId}: ${productDetail.name}`)
 
-                // Crear UNA fila por producto (sin SKUs)
                 try {
                   excelData.push(productToExcelRow(productDetail))
                 } catch (error) {
@@ -505,7 +495,6 @@ export default function ProductDisplayPage() {
           }
         }
 
-        // Pequeña pausa para no saturar el servidor
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
 
@@ -517,26 +506,23 @@ export default function ProductDisplayPage() {
         throw new Error("No se encontraron datos para exportar")
       }
 
-      // Crear el archivo Excel
       const worksheet = XLSX.utils.json_to_sheet(excelData)
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, "Todos los Productos")
 
-      // Ajustar el ancho de las columnas
       const columnWidths = [
-        { wch: 12 }, // Product ID
-        { wch: 40 }, // Product Name
-        { wch: 15 }, // Product Ref
-        { wch: 60 }, // Description
-        { wch: 20 }, // Brand
-        { wch: 25 }, // Category
-        { wch: 12 }, // Is Active
-        { wch: 150 }, // Images
-        { wch: 150 }, // Specifications
+        { wch: 12 },
+        { wch: 40 },
+        { wch: 15 },
+        { wch: 60 },
+        { wch: 20 },
+        { wch: 25 },
+        { wch: 12 },
+        { wch: 150 },
+        { wch: 150 },
       ]
       worksheet["!cols"] = columnWidths
 
-      // Descargar el archivo
       const fileName = `todos_los_productos_${new Date().toISOString().split("T")[0]}.xlsx`
       console.log(`💾 Downloading file: ${fileName}`)
       XLSX.writeFile(workbook, fileName)
@@ -559,6 +545,7 @@ export default function ProductDisplayPage() {
 
   async function loadCatalogForDiagnostic() {
     setAnalyzingData(true)
+    setExportProgress(0)
     setNotification({
       message: "Cargando catálogo completo para diagnóstico...",
       type: "success",
@@ -567,12 +554,13 @@ export default function ProductDisplayPage() {
     try {
       const catalogData: any[] = []
       let processedProducts = 0
+      const maxPages = Math.min(totalPages, 10)
 
-      // Cargar todos los productos
-      // Limitar a 10 páginas para demo y para no saturar el servidor
-      for (let page = 1; page <= Math.min(totalPages, 10); page++) {
+      for (let page = 1; page <= maxPages; page++) {
         const from = (page - 1) * ITEMS_PER_PAGE
         const to = from + ITEMS_PER_PAGE
+
+        console.log(`📄 Loading page ${page}/${maxPages}`)
 
         const result = await vtexFetch("/products/ids", {
           from: from.toString(),
@@ -584,20 +572,16 @@ export default function ProductDisplayPage() {
             try {
               const productDetail = await vtexFetch(`/products/${productId}`)
 
-              if (productDetail && productDetail.skus) {
-                productDetail.skus.forEach((sku: ProductSKU) => {
-                  catalogData.push({
-                    productId: productDetail.productId,
-                    productName: productDetail.name,
-                    productRef: productDetail.refId,
-                    productIsActive: productDetail.isActive,
-                    skuId: sku.sku,
-                    skuName: sku.name,
-                    skuRef: sku.refId,
-                    skuIsActive: sku.isActive,
-                    department: productDetail.categoryName || "Sin categoría",
-                    brand: productDetail.brandName || "Sin marca",
-                  })
+              if (productDetail && productDetail.productId) {
+                // Guardar producto sin SKUs para el análisis
+                catalogData.push({
+                  productId: productDetail.productId,
+                  productName: productDetail.name,
+                  productRef: productDetail.refId,
+                  productIsActive: productDetail.isActive,
+                  skuRef: productDetail.refId, // Usar refId del producto como referencia
+                  department: productDetail.categoryName || "Sin categoría",
+                  brand: productDetail.brandName || "Sin marca",
                 })
               }
             } catch (error) {
@@ -605,15 +589,15 @@ export default function ProductDisplayPage() {
             }
 
             processedProducts++
-            // Usar el total de productos de la primera página como referencia si totalPages es muy alto
-            const totalProductsForProgress = totalProducts > 0 ? totalProducts : ITEMS_PER_PAGE * 10
-            setExportProgress(Math.round((processedProducts / totalProductsForProgress) * 100))
+            const totalForProgress = Math.min(totalProducts, ITEMS_PER_PAGE * maxPages)
+            setExportProgress(Math.round((processedProducts / totalForProgress) * 100))
           }
         }
 
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
 
+      console.log(`✅ Loaded ${catalogData.length} products for diagnostic`)
       setDiagnosticData(catalogData)
       setNotification({
         message: `${catalogData.length} productos cargados para diagnóstico`,
@@ -635,6 +619,9 @@ export default function ProductDisplayPage() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    console.log("📂 Loading stock file:", file.name)
+    setStockFileName(file.name)
+
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
@@ -643,6 +630,9 @@ export default function ProductDisplayPage() {
         const sheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[sheetName]
         const jsonData = XLSX.utils.sheet_to_json(worksheet)
+
+        console.log("✅ Stock data loaded:", jsonData.length, "records")
+        console.log("Sample record:", jsonData[0])
 
         setStockData(jsonData)
         setNotification({
@@ -660,6 +650,24 @@ export default function ProductDisplayPage() {
     reader.readAsBinaryString(file)
   }
 
+  // Nueva función para disparar el input de archivo
+  function triggerFileUpload() {
+    fileInputRef.current?.click()
+  }
+
+  // Nueva función para limpiar el archivo de stock
+  function clearStockFile() {
+    setStockData([])
+    setStockFileName("")
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+    setNotification({
+      message: "Archivo de stock eliminado",
+      type: "success",
+    })
+  }
+
   function analyzeCatalog() {
     if (diagnosticData.length === 0) {
       setNotification({
@@ -669,21 +677,27 @@ export default function ProductDisplayPage() {
       return
     }
 
+    console.log("🔍 Starting catalog analysis...")
+    console.log("Diagnostic data count:", diagnosticData.length)
+    console.log("Stock data count:", stockData.length)
+
     setAnalyzingData(true)
 
     try {
-      // Simular campos de VTEX (en producción estos vendrían de la API)
+      // Enriquecer datos con campos simulados de VTEX
       const enrichedData = diagnosticData.map((item) => ({
         ...item,
-        _ActivateSkuIfPossible: item.skuIsActive ? "YES" : "NO",
-        _SkuIsActive: item.skuIsActive ? "YES" : "NO",
+        _ActivateSkuIfPossible: item.productIsActive ? "YES" : "NO",
+        _SkuIsActive: item.productIsActive ? "YES" : "NO",
         _ProductIsActive: item.productIsActive ? "YES" : "NO",
-        _ShowOnSite: item.productIsActive && item.skuIsActive ? "YES" : "NO",
-        _Stores: Math.floor(Math.random() * 5) + 1, // Simular store policy
-        _SKUReferenceCode: item.skuRef,
+        _ShowOnSite: item.productIsActive ? "YES" : "NO",
+        _Stores: Math.floor(Math.random() * 5) + 1,
+        _SKUReferenceCode: item.skuRef || item.productRef,
         _Gender: ["Hombre", "Mujer", "Niño", "Niña", "Unisex"][Math.floor(Math.random() * 5)],
-        _SeoName: item.productName,
+        _SeoName: item.productName?.toLowerCase() || "",
       }))
+
+      console.log("Enriched data sample:", enrichedData[0])
 
       // 1. Contar referencias con todos los campos en "YES"
       const productsWithAllYes = enrichedData.filter(
@@ -694,6 +708,8 @@ export default function ProductDisplayPage() {
           item._ShowOnSite === "YES",
       ).length
 
+      console.log("Products with all YES:", productsWithAllYes)
+
       // 2. Distribución por políticas comerciales
       const tottoCom = enrichedData.filter((item) => item._Stores === 1).length
       const mercadolibre = enrichedData.filter((item) => item._Stores === 2).length
@@ -701,11 +717,10 @@ export default function ProductDisplayPage() {
       const exito = enrichedData.filter((item) => item._Stores === 4).length
       const dafiti = enrichedData.filter((item) => item._Stores === 5).length
 
-      // Referencias que comparten Totto.com y B2B
-      const tottoAndB2BRefs = new Set<string>()
       const tottoRefs = new Set(enrichedData.filter((item) => item._Stores === 1).map((item) => item._SKUReferenceCode))
       const b2bRefs = new Set(enrichedData.filter((item) => item._Stores === 3).map((item) => item._SKUReferenceCode))
 
+      const tottoAndB2BRefs = new Set<string>()
       tottoRefs.forEach((ref) => {
         if (b2bRefs.has(ref)) {
           tottoAndB2BRefs.add(ref)
@@ -719,24 +734,44 @@ export default function ProductDisplayPage() {
         departmentSummary[dept] = (departmentSummary[dept] || 0) + 1
       })
 
+      console.log("Department summary:", departmentSummary)
+
       // 4. Productos con/sin stock
       let productsWithStock = 0
       let productsWithoutStock = 0
 
       if (stockData.length > 0) {
-        const stockMap = new Map(
-          stockData.map((item: any) => [item.SKU || item.sku || item.RefId, item.Stock || item.stock || 0]),
-        )
+        console.log("Using stock data for analysis...")
+        
+        // Crear mapa de stock - intentar múltiples campos comunes
+        const stockMap = new Map()
+        stockData.forEach((item: any) => {
+          const ref = item.SKU || item.sku || item.RefId || item.refId || item.Ref || item.ref
+          const stock = parseInt(item.Stock || item.stock || item.Quantity || item.quantity || "0")
+          
+          if (ref) {
+            stockMap.set(String(ref).trim(), stock)
+          }
+        })
+
+        console.log("Stock map size:", stockMap.size)
+        console.log("Sample stock entries:", Array.from(stockMap.entries()).slice(0, 3))
 
         enrichedData.forEach((item) => {
-          const stock = stockMap.get(item.skuRef) || 0
+          const ref = String(item._SKUReferenceCode || "").trim()
+          const stock = stockMap.get(ref) || 0
+          
           if (stock > 0) {
             productsWithStock++
           } else {
             productsWithoutStock++
           }
         })
+
+        console.log("Products with stock:", productsWithStock)
+        console.log("Products without stock:", productsWithoutStock)
       } else {
+        console.log("No stock data, simulating...")
         // Si no hay datos de stock, simular
         productsWithStock = Math.floor(enrichedData.length * 0.7)
         productsWithoutStock = enrichedData.length - productsWithStock
@@ -755,7 +790,6 @@ export default function ProductDisplayPage() {
         const gender = item._Gender?.toLowerCase() || ""
         const seoName = item._SeoName?.toLowerCase() || ""
 
-        // Detectar discrepancias
         if (gender === "niña" && (seoName.includes("niño") || seoName.includes("nino"))) {
           seoIssues.push({
             skuRef: item._SKUReferenceCode,
@@ -791,9 +825,11 @@ export default function ProductDisplayPage() {
         }
       })
 
+      console.log("SEO issues found:", seoIssues.length)
+
       const results: DiagnosticResults = {
         totalProducts: enrichedData.length,
-        activeProducts: productsWithAllYes, // Asumiendo que activeProducts se refiere a los que tienen todos los campos YES
+        activeProducts: productsWithAllYes,
         productsWithAllYes,
         storeDistribution: {
           tottoCom,
@@ -806,8 +842,10 @@ export default function ProductDisplayPage() {
         departmentSummary,
         productsWithStock,
         productsWithoutStock,
-        seoIssues: seoIssues.slice(0, 50), // Limitar a 50 para no saturar la UI
+        seoIssues: seoIssues.slice(0, 50),
       }
+
+      console.log("✅ Analysis complete:", results)
 
       setDiagnosticResults(results)
       setNotification({
@@ -835,10 +873,7 @@ export default function ProductDisplayPage() {
       ["Métrica", "Valor"],
       ["Total de productos cargados", diagnosticResults.totalProducts],
       ["Productos con todos los campos 'YES'", diagnosticResults.productsWithAllYes],
-      [
-        "Productos activos (con stock y todos YES)",
-        diagnosticResults.productsWithAllYes - diagnosticResults.productsWithoutStock,
-      ],
+      ["Productos activos (con stock y todos YES)", Math.max(0, diagnosticResults.productsWithStock)],
       ["Productos con stock", diagnosticResults.productsWithStock],
       ["Productos sin stock", diagnosticResults.productsWithoutStock],
       ["", ""],
@@ -963,7 +998,6 @@ export default function ProductDisplayPage() {
         </Alert>
       )}
 
-      {/* Barra de progreso de exportación */}
       {exporting && (
         <Card>
           <CardContent className="p-6">
@@ -1026,10 +1060,14 @@ export default function ProductDisplayPage() {
                         setDiagnosticData([])
                         setDiagnosticResults(null)
                         setStockData([])
+                        setStockFileName("")
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = ""
+                        }
                       }}
                       disabled={analyzingData}
                     >
-                      Limpiar
+                      Limpiar Todo
                     </Button>
                   )}
                 </div>
@@ -1037,26 +1075,68 @@ export default function ProductDisplayPage() {
 
               <Separator />
 
-              {/* Paso 2: Cargar stock */}
+              {/* Paso 2: Cargar stock - MEJORADO */}
               <div className="space-y-3">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Upload className="h-5 w-5" />
                   Paso 2: Cargar Archivo de Stock (Opcional)
                 </h3>
-                <div className="space-y-2">
-                  <Label htmlFor="stock-file">Selecciona archivo Excel con datos de inventario</Label>
-                  <Input
+                
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Sube un archivo Excel (.xlsx) con las columnas: <strong>SKU</strong>, <strong>RefId</strong> o <strong>Ref</strong> y <strong>Stock</strong> o <strong>Quantity</strong>
+                  </p>
+                  
+                  {/* Input oculto */}
+                  <input
+                    ref={fileInputRef}
                     id="stock-file"
                     type="file"
                     accept=".xlsx,.xls"
                     onChange={handleStockFileUpload}
-                    disabled={analyzingData || diagnosticData.length === 0}
+                    className="hidden"
                   />
-                  {stockData.length > 0 && (
-                    <p className="text-sm text-muted-foreground flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      {stockData.length} registros de stock cargados
-                    </p>
+                  
+                  {/* Botón visible y área de estado */}
+                  {stockData.length === 0 ? (
+                    <Button
+                      variant="outline"
+                      onClick={triggerFileUpload}
+                      disabled={analyzingData || diagnosticData.length === 0}
+                      className="w-full"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Seleccionar Archivo de Stock
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2 p-4 border rounded-lg bg-green-50 dark:bg-green-950">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                          Archivo cargado: {stockFileName}
+                        </p>
+                        <p className="text-xs text-green-700 dark:text-green-300">
+                          {stockData.length} registros de stock
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearStockFile}
+                        disabled={analyzingData}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  
+                  {diagnosticData.length === 0 && (
+                    <Alert>
+                      <Info className="h-4 w-4" />
+                      <AlertDescription>
+                        Primero debes cargar el catálogo en el Paso 1
+                      </AlertDescription>
+                    </Alert>
                   )}
                 </div>
               </div>
@@ -1070,7 +1150,17 @@ export default function ProductDisplayPage() {
                   Paso 3: Ejecutar Análisis
                 </h3>
                 <Button onClick={analyzeCatalog} disabled={analyzingData || diagnosticData.length === 0}>
-                  {analyzingData ? "Analizando..." : "Analizar Catálogo"}
+                  {analyzingData ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Analizando...
+                    </>
+                  ) : (
+                    <>
+                      <BarChart3 className="h-4 w-4 mr-2" />
+                      Analizar Catálogo
+                    </>
+                  )}
                 </Button>
               </div>
 
@@ -1145,9 +1235,9 @@ export default function ProductDisplayPage() {
                           </Card>
                           <Card>
                             <CardHeader className="pb-3">
-                              <CardDescription>Deberían estar Activos (con stock)</CardDescription>
+                              <CardDescription>Listos para Venta</CardDescription>
                               <CardTitle className="text-3xl text-purple-600">
-                                {diagnosticResults.productsWithAllYes - diagnosticResults.productsWithoutStock}
+                                {Math.max(0, diagnosticResults.productsWithStock)}
                               </CardTitle>
                             </CardHeader>
                           </Card>
@@ -1157,13 +1247,13 @@ export default function ProductDisplayPage() {
                           <Info className="h-4 w-4" />
                           <AlertDescription>
                             <strong>Respuesta 1:</strong> {diagnosticResults.productsWithAllYes} referencias tienen el
-                            valor "YES" en todos los campos de activación relevantes (_ActivateSkuIfPossible,
-                            _SkuIsActive, _ProductIsActive, _ShowOnSite).
+                            valor "YES" en todos los campos de activación relevantes.
                             <br />
                             <strong>Respuesta 4:</strong>{" "}
-                            {diagnosticResults.productsWithAllYes - diagnosticResults.productsWithoutStock} productos
-                            tienen todos los campos de activación en YES y además cuentan con stock disponible, por lo
-                            que deberían estar visibles y activos para la venta.
+                            {stockData.length > 0 
+                              ? `${diagnosticResults.productsWithStock} productos tienen stock disponible según el archivo cargado.`
+                              : `Los datos de stock son simulados. Carga un archivo Excel para obtener datos reales.`
+                            }
                           </AlertDescription>
                         </Alert>
                       </TabsContent>
@@ -1234,7 +1324,7 @@ export default function ProductDisplayPage() {
                                 className="flex items-center justify-between p-3 border rounded-lg bg-background"
                               >
                                 <span className="font-medium">{dept}</span>
-                                <Badge variant="secondary">{count} SKUs</Badge>
+                                <Badge variant="secondary">{count} productos</Badge>
                               </div>
                             ))}
                         </div>
@@ -1242,7 +1332,7 @@ export default function ProductDisplayPage() {
                         <Alert>
                           <Info className="h-4 w-4" />
                           <AlertDescription>
-                            <strong>Respuesta 3:</strong> La tabla muestra la cantidad de SKUs únicos por cada
+                            <strong>Respuesta 3:</strong> La tabla muestra la cantidad de productos por cada
                             departamento. En total, se identificaron{" "}
                             {Object.keys(diagnosticResults.departmentSummary).length} departamentos distintos.
                           </AlertDescription>
@@ -1257,8 +1347,7 @@ export default function ProductDisplayPage() {
                               <AlertDescription>
                                 <strong>Respuesta 5:</strong> Se detectaron {diagnosticResults.seoIssues.length}
                                 discrepancias entre el campo "Género" (_Gender) y el "Nombre SEO" (_SeoName) en el
-                                catálogo. Estos productos requieren una revisión manual para asegurar la coherencia y
-                                optimizar las prácticas de SEO.
+                                catálogo.
                               </AlertDescription>
                             </Alert>
 
@@ -1296,7 +1385,7 @@ export default function ProductDisplayPage() {
                             <CheckCircle2 className="h-4 w-4" />
                             <AlertDescription>
                               No se detectaron problemas de SEO relacionados con la coherencia entre el campo "Género" y
-                              el "Nombre SEO". Todos los productos cumplen con las buenas prácticas en este aspecto.
+                              el "Nombre SEO".
                             </AlertDescription>
                           </Alert>
                         )}
