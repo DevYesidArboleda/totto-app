@@ -50,6 +50,7 @@ interface Seller {
   sellerId: string
   sellerName: string
   sellerDefault: boolean
+  addToCartLink?:String
   commertialOffer: {
     Price: number
     ListPrice: number
@@ -1686,10 +1687,35 @@ export default function ProductDisplayPage() {
                           </div>
                         </div>
                       </div>
-                      <Button className="w-full" size="lg" onClick={handleBuy} disabled={!isItemActive(selectedItem)}>
-                        <ShoppingCart className="mr-2 h-5 w-5" />
-                        {isItemActive(selectedItem) ? "Agregar al Carrito" : "Producto no disponible"}
-                      </Button>
+                      {selectedItem && selectedItem.sellers && selectedItem.sellers.length > 0 ? (
+                        <Button
+                          className="w-full"
+                          size="lg"
+                          disabled={!isItemActive(selectedItem) || !selectedItem.sellers[0]?.addToCartLink}
+                          asChild={isItemActive(selectedItem) && !!selectedItem.sellers[0]?.addToCartLink}
+                        >
+                          {isItemActive(selectedItem) && selectedItem.sellers[0]?.addToCartLink ? (
+                            <a
+                              href={selectedItem.sellers[0].addToCartLink as string}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ShoppingCart className="mr-2 h-5 w-5" />
+                              Agregar al Carrito
+                            </a>
+                          ) : (
+                            <span>
+                              <ShoppingCart className="mr-2 h-5 w-5" />
+                              {!isItemActive(selectedItem) ? "Producto no disponible" : "Sin enlace de carrito"}
+                            </span>
+                          )}
+                        </Button>
+                      ) : (
+                        <Button className="w-full" size="lg" disabled>
+                          <ShoppingCart className="mr-2 h-5 w-5" />
+                          Producto no disponible
+                        </Button>
+                      )}
                     </>
                   )}
 
