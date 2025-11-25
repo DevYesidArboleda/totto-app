@@ -11,8 +11,6 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   ShoppingCart,
   ChevronLeft,
@@ -24,8 +22,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Info,
-  Ruler,
-  Weight,
   Box,
   Download,
   FileSpreadsheet,
@@ -37,49 +33,77 @@ import Image from "next/image"
 import * as XLSX from "xlsx"
 
 interface ProductImage {
+  imageId: string
+  imageLabel: string
   imageUrl: string
-  imageName: string
+  imageText: string
+  imageTag?: string
+  imageLastModified?: string
 }
 
-interface ProductMeasures {
-  weight: number
-  height: number
-  width: number
-  length: number
-  cubicWeight: number
+interface ReferenceId {
+  Key: string
+  Value: string
 }
 
-interface ProductSKU {
-  sku: number
+interface Seller {
+  sellerId: string
+  sellerName: string
+  sellerDefault: boolean
+  commertialOffer: {
+    Price: number
+    ListPrice: number
+    AvailableQuantity: number
+    Installments?: Array<{
+      Value: number
+      NumberOfInstallments: number
+      PaymentSystemName: string
+    }>
+  }
+}
+
+interface ProductItem {
+  itemId: string
   name: string
   nameComplete?: string
-  refId: string
+  complementName?: string
   ean?: string
-  images?: ProductImage[]
-  isActive: boolean
-  measures: ProductMeasures
+  referenceId: ReferenceId[]
   measurementUnit?: string
   unitMultiplier?: number
-}
-
-interface ProductSpecification {
-  name: string
-  value: string[]
+  images: ProductImage[]
+  sellers: Seller[]
+  variations?: string[]
+  isKit?: boolean
+  // Dimensiones vienen dentro de sellers.commertialOffer en algunos casos
+  // o como propiedades adicionales
 }
 
 interface ProductDetail {
-  productId: number
-  name: string
+  productId: string
+  productName: string
+  productTitle?: string
+  brand: string
+  brandId?: number
+  brandImageUrl?: string | null
+  linkText: string
+  productReference: string
+  productReferenceCode?: string
+  categoryId: string
+  categories: string[]
+  categoriesIds?: string[]
+  link?: string
+  metaTagDescription?: string
+  releaseDate?: string
+  clusterHighlights?: Record<string, string>
+  productClusters?: Record<string, string>
+  searchableClusters?: Record<string, string>
   description?: string
-  brand?: number
-  brandName?: string
-  category?: number
-  categoryName?: string
-  refId: string
-  isActive: boolean
-  images?: ProductImage[]
-  skus: ProductSKU[]
-  specifications?: ProductSpecification[]
+  items: ProductItem[]
+  allSpecifications?: string[]
+  allSpecificationsGroups?: string[]
+  // Especificaciones dinámicas como propiedades
+  [key: string]: any
 }
 
 interface Notification {
@@ -113,11 +137,58 @@ interface DiagnosticResults {
 
 const ITEMS_PER_PAGE = 250
 
+function getRefId(referenceId: ReferenceId[] | undefined): string {
+  if (!referenceId || referenceId.length === 0) return ""
+  const refIdObj = referenceId.find((r) => r.Key === "RefId")
+  return refIdObj?.Value || ""
+}
+
+function getPrice(sellers: Seller[] | undefined): number {
+  if (!sellers || sellers.length === 0) return 0
+  const defaultSeller = sellers.find((s) => s.sellerDefault) || sellers[0]
+  return defaultSeller?.commertialOffer?.Price || 0
+}
+
+function getAvailableQuantity(sellers: Seller[] | undefined): number {
+  if (!sellers || sellers.length === 0) return 0
+  const defaultSeller = sellers.find((s) => s.sellerDefault) || sellers[0]
+  return defaultSeller?.commertialOffer?.AvailableQuantity || 0
+}
+
+function isItemActive(item: ProductItem): boolean {
+  return getAvailableQuantity(item.sellers) > 0
+}
+
+function getCategoryName(categories: string[] | undefined): string {
+  if (!categories || categories.length === 0) return ""
+  // Categories come like "/Mujer/Accesorios/cosmetiqueras/"
+  // We want the most specific one (last non-empty segment)
+  const firstCategory = categories[0] || ""
+  const segments = firstCategory.split("/").filter(Boolean)
+  return segments[segments.length - 1] || ""
+}
+
+function getSpecifications(product: ProductDetail): Array<{ name: string; value: string[] }> {
+  const specs: Array<{ name: string; value: string[] }> = []
+  const specNames = product.allSpecifications || []
+
+  for (const specName of specNames) {
+    if (product[specName] && Array.isArray(product[specName])) {
+      specs.push({
+        name: specName,
+        value: product[specName],
+      })
+    }
+  }
+
+  return specs
+}
+
 export default function ProductDisplayPage() {
-  const [productIds, setProductIds] = useState<number[]>([])
+  const [productIds, setProductIds] = useState<string[]>([])
   const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(null)
-  const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
-  const [selectedSKU, setSelectedSKU] = useState<ProductSKU | null>(null)
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
+  const [selectedItem, setSelectedItem] = useState<ProductItem | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [loadingProduct, setLoadingProduct] = useState(false)
@@ -137,7 +208,6 @@ export default function ProductDisplayPage() {
   const [analyzingData, setAnalyzingData] = useState(false)
   const [stockFileName, setStockFileName] = useState<string>("")
 
-  // Referencia para el input de archivo
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -152,9 +222,9 @@ export default function ProductDisplayPage() {
   }, [notification])
 
   useEffect(() => {
-    if (selectedProduct && selectedProduct.skus && selectedProduct.skus.length > 0) {
-      const firstActive = selectedProduct.skus.find((sku) => sku.isActive) || selectedProduct.skus[0]
-      setSelectedSKU(firstActive)
+    if (selectedProduct && selectedProduct.items && selectedProduct.items.length > 0) {
+      const firstActive = selectedProduct.items.find((item) => isItemActive(item)) || selectedProduct.items[0]
+      setSelectedItem(firstActive)
       setCurrentImageIndex(0)
     }
   }, [selectedProduct])
@@ -252,27 +322,26 @@ export default function ProductDisplayPage() {
     setLoading(false)
   }
 
-  async function loadProductDetails(productId: number) {
+  async function loadProductDetails(productId: string) {
     console.log("🔍 Loading details for Product ID:", productId)
 
     setSelectedProductId(productId)
     setLoadingProduct(true)
     setSelectedProduct(null)
-    setSelectedSKU(null)
+    setSelectedItem(null)
 
     try {
       const data = await vtexFetch(`/products/${productId}`)
 
       console.log("📦 Raw response:", JSON.stringify(data, null, 2))
-      console.log("✅ Product name:", data?.name)
+      console.log("✅ Product name:", data?.productName)
       console.log("📦 Has productId?", !!data?.productId)
-      console.log("📦 SKUs count:", data?.skus?.length || 0)
-      console.log("📦 Images count:", data?.images?.length || 0)
+      console.log("📦 Items count:", data?.items?.length || 0)
 
       if (data && data.productId) {
         setSelectedProduct(data)
         setNotification({
-          message: `${data.name} cargado`,
+          message: `${data.productName} cargado`,
           type: "success",
         })
       } else {
@@ -292,27 +361,28 @@ export default function ProductDisplayPage() {
   function productToExcelRow(product: any) {
     console.log("🔄 Converting to Excel row:", {
       productId: product?.productId,
-      productName: product?.name,
+      productName: product?.productName,
     })
 
     let specifications = ""
     try {
-      if (product.specifications && Array.isArray(product.specifications)) {
-        specifications = product.specifications
-          .map((spec: any) => {
-            const value = Array.isArray(spec.value) ? spec.value.join(", ") : spec.value
-            return `${spec.name}: ${value}`
-          })
-          .join(" | ")
+      const specNames = product.allSpecifications || []
+      const specs: string[] = []
+      for (const specName of specNames) {
+        if (product[specName] && Array.isArray(product[specName])) {
+          specs.push(`${specName}: ${product[specName].join(", ")}`)
+        }
       }
+      specifications = specs.join(" | ")
     } catch (error) {
       console.error("Error processing specifications:", error)
     }
 
     let images = ""
     try {
-      if (product.images && Array.isArray(product.images) && product.images.length > 0) {
-        images = product.images.map((img: any) => img.imageUrl).join(" | ")
+      if (product.items && Array.isArray(product.items) && product.items.length > 0) {
+        const allImages = product.items.flatMap((item: ProductItem) => item.images?.map((img) => img.imageUrl) || [])
+        images = [...new Set(allImages)].join(" | ")
       }
     } catch (error) {
       console.error("Error processing images:", error)
@@ -320,12 +390,12 @@ export default function ProductDisplayPage() {
 
     const row = {
       "Product ID": product.productId || "",
-      "Product Name": product.name || "",
-      "Product Ref": product.refId || "",
+      "Product Name": product.productName || "",
+      "Product Ref": product.productReference || "",
       Description: product.description || "",
-      Brand: product.brandName || product.brand || "",
-      Category: product.categoryName || product.category || "",
-      "Is Active": product.isActive ? "Sí" : "No",
+      Brand: product.brand || "",
+      Category: getCategoryName(product.categories),
+      "Is Active": product.items?.some((i: ProductItem) => isItemActive(i)) ? "Sí" : "No",
       Images: images,
       Specifications: specifications,
     }
@@ -363,7 +433,7 @@ export default function ProductDisplayPage() {
           console.log("📦 Product detail received:", {
             hasData: !!productDetail,
             productId: productDetail?.productId,
-            name: productDetail?.name,
+            name: productDetail?.productName,
           })
 
           if (!productDetail) {
@@ -376,7 +446,7 @@ export default function ProductDisplayPage() {
             continue
           }
 
-          console.log(`✅ Product ${productId} (${productDetail.name}): Processing`)
+          console.log(`✅ Product ${productId} (${productDetail.productName}): Processing`)
 
           try {
             const row = productToExcelRow(productDetail)
@@ -476,7 +546,7 @@ export default function ProductDisplayPage() {
               const productDetail = await vtexFetch(`/products/${productId}`)
 
               if (productDetail && productDetail.productId) {
-                console.log(`✅ Product ${productId}: ${productDetail.name}`)
+                console.log(`✅ Product ${productId}: ${productDetail.productName}`)
 
                 try {
                   excelData.push(productToExcelRow(productDetail))
@@ -573,15 +643,14 @@ export default function ProductDisplayPage() {
               const productDetail = await vtexFetch(`/products/${productId}`)
 
               if (productDetail && productDetail.productId) {
-                // Guardar producto sin SKUs para el análisis
                 catalogData.push({
                   productId: productDetail.productId,
-                  productName: productDetail.name,
-                  productRef: productDetail.refId,
-                  productIsActive: productDetail.isActive,
-                  skuRef: productDetail.refId, // Usar refId del producto como referencia
-                  department: productDetail.categoryName || "Sin categoría",
-                  brand: productDetail.brandName || "Sin marca",
+                  productName: productDetail.productName,
+                  productRef: productDetail.productReference,
+                  productIsActive: productDetail.items?.some((i: ProductItem) => isItemActive(i)),
+                  skuRef: productDetail.productReference,
+                  department: getCategoryName(productDetail.categories) || "Sin categoría",
+                  brand: productDetail.brand || "Sin marca",
                 })
               }
             } catch (error) {
@@ -650,12 +719,10 @@ export default function ProductDisplayPage() {
     reader.readAsBinaryString(file)
   }
 
-  // Nueva función para disparar el input de archivo
   function triggerFileUpload() {
     fileInputRef.current?.click()
   }
 
-  // Nueva función para limpiar el archivo de stock
   function clearStockFile() {
     setStockData([])
     setStockFileName("")
@@ -684,7 +751,6 @@ export default function ProductDisplayPage() {
     setAnalyzingData(true)
 
     try {
-      // Enriquecer datos con campos simulados de VTEX
       const enrichedData = diagnosticData.map((item) => ({
         ...item,
         _ActivateSkuIfPossible: item.productIsActive ? "YES" : "NO",
@@ -699,7 +765,6 @@ export default function ProductDisplayPage() {
 
       console.log("Enriched data sample:", enrichedData[0])
 
-      // 1. Contar referencias con todos los campos en "YES"
       const productsWithAllYes = enrichedData.filter(
         (item) =>
           item._ActivateSkuIfPossible === "YES" &&
@@ -710,7 +775,6 @@ export default function ProductDisplayPage() {
 
       console.log("Products with all YES:", productsWithAllYes)
 
-      // 2. Distribución por políticas comerciales
       const tottoCom = enrichedData.filter((item) => item._Stores === 1).length
       const mercadolibre = enrichedData.filter((item) => item._Stores === 2).length
       const b2b = enrichedData.filter((item) => item._Stores === 3).length
@@ -727,7 +791,6 @@ export default function ProductDisplayPage() {
         }
       })
 
-      // 3. Tabla dinámica por departamento
       const departmentSummary: Record<string, number> = {}
       enrichedData.forEach((item) => {
         const dept = item.department || "Sin categoría"
@@ -736,19 +799,17 @@ export default function ProductDisplayPage() {
 
       console.log("Department summary:", departmentSummary)
 
-      // 4. Productos con/sin stock
       let productsWithStock = 0
       let productsWithoutStock = 0
 
       if (stockData.length > 0) {
         console.log("Using stock data for analysis...")
-        
-        // Crear mapa de stock - intentar múltiples campos comunes
+
         const stockMap = new Map()
         stockData.forEach((item: any) => {
           const ref = item.SKU || item.sku || item.RefId || item.refId || item.Ref || item.ref
-          const stock = parseInt(item.Stock || item.stock || item.Quantity || item.quantity || "0")
-          
+          const stock = Number.parseInt(item.Stock || item.stock || item.Quantity || item.quantity || "0")
+
           if (ref) {
             stockMap.set(String(ref).trim(), stock)
           }
@@ -760,7 +821,7 @@ export default function ProductDisplayPage() {
         enrichedData.forEach((item) => {
           const ref = String(item._SKUReferenceCode || "").trim()
           const stock = stockMap.get(ref) || 0
-          
+
           if (stock > 0) {
             productsWithStock++
           } else {
@@ -772,12 +833,10 @@ export default function ProductDisplayPage() {
         console.log("Products without stock:", productsWithoutStock)
       } else {
         console.log("No stock data, simulating...")
-        // Si no hay datos de stock, simular
         productsWithStock = Math.floor(enrichedData.length * 0.7)
         productsWithoutStock = enrichedData.length - productsWithStock
       }
 
-      // 5. Detectar problemas de SEO
       const seoIssues: Array<{
         skuRef: string
         productName: string
@@ -868,7 +927,6 @@ export default function ProductDisplayPage() {
 
     const wb = XLSX.utils.book_new()
 
-    // Hoja 1: Resumen general
     const summaryData = [
       ["Métrica", "Valor"],
       ["Total de productos cargados", diagnosticResults.totalProducts],
@@ -888,12 +946,10 @@ export default function ProductDisplayPage() {
     const ws1 = XLSX.utils.aoa_to_sheet(summaryData)
     XLSX.utils.book_append_sheet(wb, ws1, "Resumen")
 
-    // Hoja 2: Por departamento
     const deptData = [["Departamento", "Cantidad de SKUs"], ...Object.entries(diagnosticResults.departmentSummary)]
     const ws2 = XLSX.utils.aoa_to_sheet(deptData)
     XLSX.utils.book_append_sheet(wb, ws2, "Por Departamento")
 
-    // Hoja 3: Problemas de SEO
     if (diagnosticResults.seoIssues.length > 0) {
       const seoData = [
         ["SKU Ref", "Nombre Producto", "Género", "Nombre SEO", "Problema"],
@@ -938,8 +994,7 @@ export default function ProductDisplayPage() {
   }
 
   function nextImage() {
-    const images =
-      selectedSKU?.images && selectedSKU.images.length > 0 ? selectedSKU.images : selectedProduct?.images || []
+    const images = selectedItem?.images && selectedItem.images.length > 0 ? selectedItem.images : []
 
     if (images.length > 0) {
       setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
@@ -947,8 +1002,7 @@ export default function ProductDisplayPage() {
   }
 
   function prevImage() {
-    const images =
-      selectedSKU?.images && selectedSKU.images.length > 0 ? selectedSKU.images : selectedProduct?.images || []
+    const images = selectedItem?.images && selectedItem.images.length > 0 ? selectedItem.images : []
 
     if (images.length > 0) {
       setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))
@@ -956,16 +1010,15 @@ export default function ProductDisplayPage() {
   }
 
   function handleBuy() {
-    if (selectedSKU) {
+    if (selectedItem) {
       setNotification({
-        message: `${selectedProduct?.name} agregado al carrito`,
+        message: `${selectedProduct?.productName} agregado al carrito`,
         type: "success",
       })
     }
   }
 
-  const currentImages =
-    selectedSKU?.images && selectedSKU.images.length > 0 ? selectedSKU.images : selectedProduct?.images || []
+  const currentImages = selectedItem?.images && selectedItem.images.length > 0 ? selectedItem.images : []
 
   return (
     <div className="min-h-screen p-6 space-y-6">
@@ -1033,7 +1086,6 @@ export default function ProductDisplayPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Paso 1: Cargar catálogo */}
               <div className="space-y-3">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Package className="h-5 w-5" />
@@ -1075,19 +1127,18 @@ export default function ProductDisplayPage() {
 
               <Separator />
 
-              {/* Paso 2: Cargar stock - MEJORADO */}
               <div className="space-y-3">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Upload className="h-5 w-5" />
                   Paso 2: Cargar Archivo de Stock (Opcional)
                 </h3>
-                
+
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Sube un archivo Excel (.xlsx) con las columnas: <strong>SKU</strong>, <strong>RefId</strong> o <strong>Ref</strong> y <strong>Stock</strong> o <strong>Quantity</strong>
+                    Sube un archivo Excel (.xlsx) con las columnas: <strong>SKU</strong>, <strong>RefId</strong> o{" "}
+                    <strong>Ref</strong> y <strong>Stock</strong> o <strong>Quantity</strong>
                   </p>
-                  
-                  {/* Input oculto */}
+
                   <input
                     ref={fileInputRef}
                     id="stock-file"
@@ -1096,14 +1147,13 @@ export default function ProductDisplayPage() {
                     onChange={handleStockFileUpload}
                     className="hidden"
                   />
-                  
-                  {/* Botón visible y área de estado */}
+
                   {stockData.length === 0 ? (
                     <Button
                       variant="outline"
                       onClick={triggerFileUpload}
                       disabled={analyzingData || diagnosticData.length === 0}
-                      className="w-full"
+                      className="w-full bg-transparent"
                     >
                       <Upload className="h-4 w-4 mr-2" />
                       Seleccionar Archivo de Stock
@@ -1119,23 +1169,16 @@ export default function ProductDisplayPage() {
                           {stockData.length} registros de stock
                         </p>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearStockFile}
-                        disabled={analyzingData}
-                      >
+                      <Button variant="ghost" size="sm" onClick={clearStockFile} disabled={analyzingData}>
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
                   )}
-                  
+
                   {diagnosticData.length === 0 && (
                     <Alert>
                       <Info className="h-4 w-4" />
-                      <AlertDescription>
-                        Primero debes cargar el catálogo en el Paso 1
-                      </AlertDescription>
+                      <AlertDescription>Primero debes cargar el catálogo en el Paso 1</AlertDescription>
                     </Alert>
                   )}
                 </div>
@@ -1143,7 +1186,6 @@ export default function ProductDisplayPage() {
 
               <Separator />
 
-              {/* Paso 3: Analizar */}
               <div className="space-y-3">
                 <h3 className="font-semibold flex items-center gap-2">
                   <BarChart3 className="h-5 w-5" />
@@ -1164,7 +1206,6 @@ export default function ProductDisplayPage() {
                 </Button>
               </div>
 
-              {/* Barra de progreso */}
               {analyzingData && exportProgress > 0 && (
                 <div className="space-y-2">
                   <Progress value={exportProgress} className="h-2" />
@@ -1172,7 +1213,6 @@ export default function ProductDisplayPage() {
                 </div>
               )}
 
-              {/* Resultados */}
               {diagnosticResults && (
                 <>
                   <Separator />
@@ -1250,10 +1290,9 @@ export default function ProductDisplayPage() {
                             valor "YES" en todos los campos de activación relevantes.
                             <br />
                             <strong>Respuesta 4:</strong>{" "}
-                            {stockData.length > 0 
+                            {stockData.length > 0
                               ? `${diagnosticResults.productsWithStock} productos tienen stock disponible según el archivo cargado.`
-                              : `Los datos de stock son simulados. Carga un archivo Excel para obtener datos reales.`
-                            }
+                              : `Los datos de stock son simulados. Carga un archivo Excel para obtener datos reales.`}
                           </AlertDescription>
                         </Alert>
                       </TabsContent>
@@ -1504,7 +1543,7 @@ export default function ProductDisplayPage() {
                       <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
                         <Image
                           src={currentImages[currentImageIndex]?.imageUrl || ""}
-                          alt={currentImages[currentImageIndex]?.imageName || selectedProduct.name}
+                          alt={currentImages[currentImageIndex]?.imageText || selectedProduct.productName}
                           fill
                           className="object-contain"
                           unoptimized
@@ -1547,7 +1586,7 @@ export default function ProductDisplayPage() {
                               >
                                 <Image
                                   src={img.imageUrl || "/placeholder.svg"}
-                                  alt={img.imageName}
+                                  alt={img.imageText}
                                   fill
                                   className="object-cover"
                                   unoptimized
@@ -1571,44 +1610,44 @@ export default function ProductDisplayPage() {
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1 flex-1">
-                      <CardTitle className="text-3xl">{selectedProduct.name}</CardTitle>
+                      <CardTitle className="text-3xl">{selectedProduct.productName}</CardTitle>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant={selectedProduct.isActive ? "default" : "secondary"}>
-                          {selectedProduct.isActive ? "Activo" : "Inactivo"}
+                        <Badge variant={selectedProduct.items?.some((i) => isItemActive(i)) ? "default" : "secondary"}>
+                          {selectedProduct.items?.some((i) => isItemActive(i)) ? "Activo" : "Inactivo"}
                         </Badge>
-                        {selectedProduct.brandName && <Badge variant="outline">{selectedProduct.brandName}</Badge>}
-                        {selectedProduct.categoryName && (
-                          <Badge variant="outline">{selectedProduct.categoryName}</Badge>
+                        {selectedProduct.brand && <Badge variant="outline">{selectedProduct.brand}</Badge>}
+                        {selectedProduct.categories && selectedProduct.categories.length > 0 && (
+                          <Badge variant="outline">{getCategoryName(selectedProduct.categories)}</Badge>
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        ID: {selectedProduct.productId} | Ref: {selectedProduct.refId}
+                        ID: {selectedProduct.productId} | Ref: {selectedProduct.productReference}
                       </p>
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {selectedProduct.skus && selectedProduct.skus.length > 1 && (
+                  {selectedProduct.items && selectedProduct.items.length > 1 && (
                     <div>
                       <label className="text-sm font-semibold mb-3 block">
-                        Selecciona una variante ({selectedProduct.skus.length} disponibles)
+                        Selecciona una variante ({selectedProduct.items.length} disponibles)
                       </label>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {selectedProduct.skus.map((sku) => (
+                        {selectedProduct.items.map((item) => (
                           <Button
-                            key={sku.sku}
-                            variant={selectedSKU?.sku === sku.sku ? "default" : "outline"}
+                            key={item.itemId}
+                            variant={selectedItem?.itemId === item.itemId ? "default" : "outline"}
                             className="justify-start h-auto py-3 text-left"
                             onClick={() => {
-                              setSelectedSKU(sku)
+                              setSelectedItem(item)
                               setCurrentImageIndex(0)
                             }}
                           >
                             <div className="w-full">
-                              <div className="font-medium">{sku.name}</div>
+                              <div className="font-medium">{item.name}</div>
                               <div className="text-xs opacity-70">
-                                SKU: {sku.sku} | Ref: {sku.refId}
+                                SKU: {item.itemId} | Ref: {getRefId(item.referenceId)}
                               </div>
                             </div>
                           </Button>
@@ -1617,38 +1656,47 @@ export default function ProductDisplayPage() {
                     </div>
                   )}
 
-                  {selectedSKU && (
+                  {selectedItem && (
                     <>
                       <Separator />
                       <div className="p-4 bg-muted rounded-lg">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold">SKU Seleccionado:</span>
-                            <Badge>{selectedSKU.name}</Badge>
+                            <Badge>{selectedItem.name}</Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            ID: {selectedSKU.sku} | Ref: {selectedSKU.refId}
-                            {selectedSKU.ean && ` | EAN: ${selectedSKU.ean}`}
+                            ID: {selectedItem.itemId} | Ref: {getRefId(selectedItem.referenceId)}
+                            {selectedItem.ean && ` | EAN: ${selectedItem.ean}`}
                           </div>
+                          {getPrice(selectedItem.sellers) > 0 && (
+                            <div className="text-lg font-bold text-primary">
+                              ${(getPrice(selectedItem.sellers) / 100).toLocaleString("es-CO")}
+                            </div>
+                          )}
                           <div className="flex items-center gap-2 text-sm">
-                            <Badge variant={selectedSKU.isActive ? "default" : "secondary"}>
-                              {selectedSKU.isActive ? "Activo" : "Inactivo"}
+                            <Badge variant={isItemActive(selectedItem) ? "default" : "secondary"}>
+                              {isItemActive(selectedItem) ? "Disponible" : "Sin stock"}
                             </Badge>
+                            {getAvailableQuantity(selectedItem.sellers) > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                ({getAvailableQuantity(selectedItem.sellers)} unidades)
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
-                      <Button className="w-full" size="lg" onClick={handleBuy} disabled={!selectedSKU.isActive}>
+                      <Button className="w-full" size="lg" onClick={handleBuy} disabled={!isItemActive(selectedItem)}>
                         <ShoppingCart className="mr-2 h-5 w-5" />
-                        {selectedSKU.isActive ? "Agregar al Carrito" : "Producto no disponible"}
+                        {isItemActive(selectedItem) ? "Agregar al Carrito" : "Producto no disponible"}
                       </Button>
                     </>
                   )}
 
                   <Tabs defaultValue="description" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="description">Descripción</TabsTrigger>
                       <TabsTrigger value="specs">Especificaciones</TabsTrigger>
-                      <TabsTrigger value="measures">Medidas</TabsTrigger>
                     </TabsList>
                     <TabsContent value="description" className="space-y-4 mt-4">
                       <div>
@@ -1662,67 +1710,22 @@ export default function ProductDisplayPage() {
                       </div>
                     </TabsContent>
                     <TabsContent value="specs" className="space-y-4 mt-4">
-                      {selectedProduct.specifications && selectedProduct.specifications.length > 0 ? (
+                      {getSpecifications(selectedProduct).length > 0 ? (
                         <div className="space-y-3">
                           <h4 className="font-semibold mb-3 flex items-center gap-2">
                             <Box className="h-4 w-4" />
                             Especificaciones técnicas
                           </h4>
-                          {selectedProduct.specifications.map((spec, index) => (
+                          {getSpecifications(selectedProduct).map((spec, index) => (
                             <div key={index} className="flex justify-between items-start py-2 border-b">
                               <span className="font-medium text-sm">{spec.name}</span>
-                              <span className="text-sm text-muted-foreground text-right">
-                                {Array.isArray(spec.value) ? spec.value.join(", ") : spec.value}
-                              </span>
+                              <span className="text-sm text-muted-foreground text-right">{spec.value.join(", ")}</span>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground text-center py-8">
                           No hay especificaciones disponibles
-                        </p>
-                      )}
-                    </TabsContent>
-                    <TabsContent value="measures" className="space-y-4 mt-4">
-                      {selectedSKU ? (
-                        <div className="space-y-3">
-                          <h4 className="font-semibold mb-3 flex items-center gap-2">
-                            <Ruler className="h-4 w-4" />
-                            Dimensiones y peso
-                          </h4>
-                          <div className="flex items-center justify-between py-2 border-b">
-                            <div className="flex items-center gap-2">
-                              <Weight className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-medium text-sm">Peso</span>
-                            </div>
-                            <span className="text-sm">{selectedSKU.measures.weight} kg</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-b">
-                            <span className="font-medium text-sm">Alto</span>
-                            <span className="text-sm">{selectedSKU.measures.height} cm</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-b">
-                            <span className="font-medium text-sm">Ancho</span>
-                            <span className="text-sm">{selectedSKU.measures.width} cm</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-b">
-                            <span className="font-medium text-sm">Largo</span>
-                            <span className="text-sm">{selectedSKU.measures.length} cm</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-b">
-                            <span className="font-medium text-sm">Peso cúbico</span>
-                            <span className="text-sm">{selectedSKU.measures.cubicWeight} kg</span>
-                          </div>
-                          {selectedSKU.measurementUnit && (
-                            <div className="flex items-center justify-between py-2">
-                              <span className="font-medium text-sm">Unidad de medida</span>
-                              <span className="text-sm">{selectedSKU.measurementUnit}</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground text-center py-8">
-                          Selecciona un SKU para ver sus medidas
                         </p>
                       )}
                     </TabsContent>

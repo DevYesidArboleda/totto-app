@@ -21,7 +21,7 @@ export async function GET(
     }
 
     // Obtener información completa del producto
-    const productUrl = `https://${accountName}.${environment}.com/api/catalog/pvt/product/${id}`
+    const productUrl = `https://${accountName}.${environment}.com/api/catalog_system/pub/products/search/${id}`
 
     const productResponse = await fetch(productUrl, {
       method: "GET",
@@ -96,8 +96,13 @@ export async function GET(
         value: spec.FieldValues,
       })) || [],
     }
+
+    if (!Array.isArray(productData) || productData.length === 0) {
+      return NextResponse.json({ error: "Product not found" }, { status: 404 })
+    }
+    return NextResponse.json(productData[0])
     
-    return NextResponse.json(formattedResponse)
+    //return NextResponse.json(productData)
   } catch (error) {
     console.error("❌ Error fetching product detail:", error)
     return NextResponse.json(
